@@ -94,17 +94,36 @@ Launch one:
 llama qwen-flash-q4-128k
 ```
 
-Show the fully resolved command:
+Show the fully resolved command, one argument per line:
 
 ```bash
 llama --show qwen-flash-q4-128k
 ```
 
-Dry-run a launch:
+```text
+/home/me/workspace/llama.cpp/build/bin/llama-server \
+  -m /home/me/models/model.gguf \
+  --alias qwen-flash-q4-128k \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --jinja \
+  --flash-attn on \
+  --ctx-size 131072
+```
+
+Dry-run a launch (same output, including extra arguments):
 
 ```bash
 llama --dry-run qwen-flash-q4-128k
 ```
+
+Use `--one-line` for a single-line, copy-pasteable command:
+
+```bash
+llama --one-line --show qwen-flash-q4-128k
+```
+
+Both forms are valid shell input, so either can be piped into a shell or `eval`'d.
 
 Pass additional `llama-server` arguments through unchanged:
 
@@ -113,6 +132,8 @@ llama qwen-flash-q4-128k --port 8081
 ```
 
 Because extra arguments are appended to the configured arguments, they are also convenient for one-off `llama-server` overrides where llama.cpp accepts the later occurrence.
+
+Everything after the model name is treated as a `llama-server` argument, so launcher flags such as `--dry-run` and `--one-line` must come *before* the model name.
 
 Use another config file:
 
@@ -131,8 +152,10 @@ export LLAMA_PROFILE_CONFIG=~/my-models.toml
 The configuration has three layers:
 
 1. `[defaults.args]` — arguments shared by every model.
-2. `[profiles.<name>.args]` — reusable groups of arguments.
-3. `[models.<name>.args]` — model-specific overrides.
+2. `[profiles."<name>".args]` — reusable groups of arguments.
+3. `[models."<name>".args]` — model-specific overrides.
+
+Quote profile and model names (the `"<name>"` segments). Bare TOML keys cannot contain `.` or other special characters, so an unquoted `qwen-3.8-flash-next` would be split into nested `qwen-3` → `8-...` tables rather than read as one name.
 
 Later layers override earlier layers by flag name.
 
@@ -148,7 +171,7 @@ native = "~/workspace/llama.cpp/build/bin/llama-server"
 "--parallel" = 1
 "--jinja" = true
 
-[profiles.flash.args]
+[profiles."flash".args]
 "--flash-attn" = "on"
 "--load-mode" = "mmap"
 "--lazy-mode" = "on"

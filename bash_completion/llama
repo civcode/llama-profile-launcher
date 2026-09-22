@@ -18,7 +18,7 @@ _llama_profile_launcher_complete() {
 
     if [[ $COMP_CWORD -eq 1 ]]; then
         mapfile -t COMPREPLY < <(
-            compgen -W "--config --list --show --dry-run $(llama --list 2>/dev/null)" -- "$cur"
+            compgen -W "--config --list --show --dry-run --one-line $(llama --list 2>/dev/null)" -- "$cur"
         )
     fi
 }

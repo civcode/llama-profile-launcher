@@ -18,7 +18,7 @@ qwen38 = "/home/chris/workspace/llama.cpp-qwen38-mtp/build/bin/llama-server"
 "--reasoning" = "auto"
 "--reasoning-budget" = -1
 
-[profiles.flash.args]
+[profiles."flash".args]
 "--spec-type" = "draft-mtp"
 "--spec-draft-n-max" = 3
 "--load-mode" = "mmap"

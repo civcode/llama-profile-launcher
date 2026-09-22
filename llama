@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import sys
 import tomllib
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +48,8 @@ def merge_args(*sources: dict[str, Any] | None) -> dict[str, Any]:
     return merged
 
 
-def append_flag_args(command: list[str], args: dict[str, Any]) -> None:
+def append_flag_args(groups: list[list[str]], args: dict[str, Any]) -> None:
+    """Append config arguments as argument groups (a flag plus its values)."""
     for flag, value in args.items():
         if not flag.startswith("-"):
             raise ConfigError(f"argument key must be a flag, got {flag!r}")
@@ -54,18 +57,49 @@ def append_flag_args(command: list[str], args: dict[str, Any]) -> None:
         if value is False or value is None:
             continue
         if value is True:
-            command.append(flag)
+            groups.append([flag])
             continue
 
         if isinstance(value, list):
             for item in value:
-                command.extend((flag, str(item)))
+                groups.append([flag, str(item)])
             continue
 
-        command.extend((flag, str(value)))
+        groups.append([flag, str(value)])
 
 
-def model_command(config: dict[str, Any], name: str) -> list[str]:
+def flatten(groups: list[list[str]]) -> list[str]:
+    return [token for group in groups for token in group]
+
+
+# Values that look like negative numbers, so they are not mistaken for flags.
+NUMERIC_VALUE = re.compile(r"-(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
+
+
+def group_tokens(tokens: Iterable[str]) -> list[list[str]]:
+    """Group a flat token list into argument groups (a flag plus its values)."""
+    groups: list[list[str]] = []
+    for token in tokens:
+        if token.startswith("-") and not NUMERIC_VALUE.match(token):
+            groups.append([token])
+        elif groups:
+            groups[-1].append(token)
+        else:
+            groups.append([token])
+    return groups
+
+
+def format_command(groups: list[list[str]], one_line: bool = False) -> str:
+    """Render a resolved command, one argument per line unless one_line is set."""
+    if one_line or len(groups) < 2:
+        return shlex.join(flatten(groups))
+
+    lines = [shlex.join(groups[0])]
+    lines.extend(f"  {shlex.join(group)}" for group in groups[1:])
+    return " \\\n".join(lines)
+
+
+def model_command(config: dict[str, Any], name: str) -> list[list[str]]:
     models = config["models"]
     if name not in models:
         choices = ", ".join(sorted(models))
@@ -99,23 +133,22 @@ def model_command(config: dict[str, Any], name: str) -> list[str]:
     model_args = model.get("args", {})
     args = merge_args(defaults, profile_args, model_args)
 
-    command = [binary, "-m", expand_path(model_path)]
+    command: list[list[str]] = [[binary], ["-m", expand_path(model_path)]]
 
     draft_model = model.get("draft_model")
     if draft_model:
-        command.extend(("-md", expand_path(draft_model)))
+        command.append(["-md", expand_path(draft_model)])
 
     server_alias = model.get("server_alias")
     if server_alias:
-        command.extend(("--alias", str(server_alias)))
+        command.append(["--alias", str(server_alias)])
 
     append_flag_args(command, args)
     return command
 
 
-def print_model(config: dict[str, Any], name: str) -> None:
-    command = model_command(config, name)
-    print(shlex.join(command))
+def print_model(config: dict[str, Any], name: str, one_line: bool = False) -> None:
+    print(format_command(model_command(config, name), one_line=one_line))
 
 
 def parse_cli(argv: list[str]) -> argparse.Namespace:
@@ -140,6 +173,12 @@ def parse_cli(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="print the command instead of replacing this process",
     )
+    parser.add_argument(
+        "--one-line",
+        action="store_true",
+        help="print the command on a single line instead of one argument per "
+        "line (must precede MODEL)",
+    )
     parser.add_argument("model", nargs="?", help="model profile to launch")
     parser.add_argument(
         "extra",
@@ -161,17 +200,18 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if ns.show:
-            print_model(config, ns.show)
+            print_model(config, ns.show, one_line=ns.one_line)
             return 0
 
         if not ns.model:
             raise ConfigError("MODEL is required (or use --list / --show MODEL)")
 
-        command = model_command(config, ns.model)
-        command.extend(ns.extra)
+        groups = model_command(config, ns.model)
+        groups.extend(group_tokens(ns.extra))
+        command = flatten(groups)
 
         if ns.dry_run:
-            print(shlex.join(command))
+            print(format_command(groups, one_line=ns.one_line))
             return 0
 
         binary = command[0]
