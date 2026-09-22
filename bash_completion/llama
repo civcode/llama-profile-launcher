@@ -1,0 +1,26 @@
+# Bash completion for llama-profile-launcher.
+
+_llama_profile_launcher_complete() {
+    local cur prev
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    case "$prev" in
+        --config)
+            mapfile -t COMPREPLY < <(compgen -f -- "$cur")
+            return
+            ;;
+        --show)
+            mapfile -t COMPREPLY < <(compgen -W "$(llama --list 2>/dev/null)" -- "$cur")
+            return
+            ;;
+    esac
+
+    if [[ $COMP_CWORD -eq 1 ]]; then
+        mapfile -t COMPREPLY < <(
+            compgen -W "--config --list --show --dry-run $(llama --list 2>/dev/null)" -- "$cur"
+        )
+    fi
+}
+
+complete -F _llama_profile_launcher_complete llama
