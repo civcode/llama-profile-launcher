@@ -1,84 +1,68 @@
 # llama-profile-launcher
 
-A tiny Python launcher for keeping `llama.cpp` / `llama-server` model profiles in a human-readable JSON file instead of large shell aliases.
+A tiny Python launcher for keeping `llama.cpp` / `llama-server` model profiles in JSON instead of large shell aliases.
 
-It supports shared defaults, composable profiles, per-model overrides, arbitrary extra `llama-server` arguments, and dynamic Bash completion for model names.
+The repository can also be the source of truth for a machine's actual llama.cpp setup: launcher code, host configs, shell integration, and install scripts live together, while GGUFs and llama.cpp builds stay outside the repo.
 
-## Why
+## Repository layout
 
-Instead of maintaining aliases like this:
-
-```bash
-alias my-model='llama-server -m ... --ctx-size ... --flash-attn on ...'
+```text
+.
+├── llama
+├── config/
+│   ├── examples/
+│   │   └── models.example.json
+│   └── hosts/
+│       └── workstation.json
+├── shell/
+│   ├── bash_completion/
+│   │   └── llama
+│   └── bashrc.snippet
+├── scripts/
+│   └── install.sh
+├── tests/
+│   ├── test_config.py
+│   └── test_profiles.py
+├── README.md
+├── LICENSE
+└── .gitignore
 ```
 
-define reusable settings once and compose them for each model:
+`config/examples/models.example.json` is the portable example configuration. `config/hosts/workstation.json` is the checked-in configuration for the actual workstation.
 
-```json
-{
-  "models": {
-    "my-model": {
-      "profiles": ["qwen", "flash-next", "mtp"]
-    }
-  }
-}
-```
+## Install this workstation setup
 
-Then launch it with:
-
-```bash
-llama my-model
-```
-
-Adding a model to the JSON file automatically adds it to Bash completion.
-
-## Requirements
-
-- Linux or another Unix-like environment
-- Python 3.11+
-- `llama-server` builds already installed
-- Bash for the included completion script
-
-No third-party Python packages are required.
-
-## Install
-
-Clone the repository, then install the launcher and config:
+Clone the repository and run:
 
 ```bash
 git clone https://github.com/civcode/llama-profile-launcher.git
 cd llama-profile-launcher
-
-install -Dm755 llama ~/.local/bin/llama
-install -Dm644 llama-models.json ~/.config/llama-profile-launcher/models.json
+./scripts/install.sh workstation
 ```
 
-Make sure `~/.local/bin` is on your `PATH`:
+The installer:
+
+- installs `llama` to `~/.local/bin/llama`
+- installs Bash completion
+- symlinks `config/hosts/workstation.json` to `~/.config/llama-profile-launcher/models.json`
+
+The symlink keeps the repository configuration as the source of truth. Editing and committing `config/hosts/workstation.json` immediately changes the configuration used by the launcher.
+
+For another machine, add another file under `config/hosts/` and pass its basename:
+
+```bash
+./scripts/install.sh laptop
+```
+
+which uses `config/hosts/laptop.json`.
+
+Make sure `~/.local/bin` is on `PATH`:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Edit the binary and model paths in:
-
-```text
-~/.config/llama-profile-launcher/models.json
-```
-
-### Bash completion
-
-If your system uses `bash-completion`, install the completion file:
-
-```bash
-install -Dm644 bash_completion/llama \
-  ~/.local/share/bash-completion/completions/llama
-```
-
-Open a new shell, or source it directly for the current shell:
-
-```bash
-source ~/.local/share/bash-completion/completions/llama
-```
+Optional convenience aliases are in `shell/bashrc.snippet`.
 
 ## Usage
 
@@ -88,62 +72,35 @@ List configured models:
 llama --list
 ```
 
-Launch one:
+Launch a model:
 
 ```bash
-llama qwen-flash-q4-128k
+llama qwen-27b-120k
 ```
 
-Show the fully resolved command, one argument group per line:
+Show the fully resolved command:
 
 ```bash
-llama --show qwen-flash-q4-128k
+llama --show qwen-27b-120k
 ```
 
 Dry-run a launch:
 
 ```bash
-llama --dry-run qwen-flash-q4-128k
+llama --dry-run qwen-27b-120k
 ```
 
-Use `--one-line` for a single-line, copy-pasteable command:
+Use another config explicitly:
 
 ```bash
-llama --one-line --show qwen-flash-q4-128k
+llama --config ./config/examples/models.example.json --list
 ```
 
-Pass additional `llama-server` arguments through unchanged:
+Everything after the model name is passed to `llama-server`, so launcher flags such as `--dry-run` and `--one-line` must come before the model name.
 
-```bash
-llama qwen-flash-q4-128k --port 8081
-```
+## Configuration model
 
-Everything after the model name is treated as a `llama-server` argument, so launcher flags such as `--dry-run` and `--one-line` must come before the model name.
-
-Use another config file:
-
-```bash
-llama --config ~/my-models.json --list
-```
-
-or set it once with:
-
-```bash
-export LLAMA_PROFILE_CONFIG=~/my-models.json
-```
-
-## Configuration
-
-The JSON configuration is designed around four conceptual layers:
-
-1. `defaults.args` — machine/server-wide settings shared by every model.
-2. Family profiles such as `qwen`, `llama`, `gemma`, or `mistral`.
-3. Feature/runtime profiles such as `mtp`, `flash-next`, or an offload preset.
-4. `models.<name>.args` — model-specific tuning and final overrides.
-
-Family and feature profiles use the same `profiles.<name>.args` mechanism. A model composes as many profiles as it needs with a `profiles` array.
-
-Arguments are merged in this order:
+Configuration is layered as:
 
 ```text
 defaults
@@ -153,117 +110,70 @@ defaults
 → model args
 ```
 
-Later layers override earlier layers by flag name, so profile order is meaningful.
+Later layers override earlier layers by flag name.
 
-### Example
-
-```json
-{
-  "binaries": {
-    "native": "~/workspace/llama.cpp/build/bin/llama-server"
-  },
-  "defaults": {
-    "args": {
-      "--host": "127.0.0.1",
-      "--port": 8080
-    }
-  },
-  "profiles": {
-    "qwen": {
-      "args": {
-        "--parallel": 1,
-        "--jinja": true,
-        "--temp": 1.0,
-        "--top-p": 0.95,
-        "--top-k": 20,
-        "--min-p": 0.0,
-        "--reasoning-format": "auto",
-        "--reasoning": "auto",
-        "--reasoning-budget": -1
-      }
-    },
-    "flash-next": {
-      "args": {
-        "--load-mode": "mmap",
-        "--lazy-mode": "on",
-        "--flash-attn": "on"
-      }
-    },
-    "mtp": {
-      "args": {
-        "--spec-type": "draft-mtp",
-        "--spec-draft-n-max": 3
-      }
-    }
-  },
-  "models": {
-    "my-model": {
-      "binary": "native",
-      "profiles": ["qwen", "flash-next", "mtp"],
-      "model": "~/models/model.gguf",
-      "draft_model": "~/models/mtp.gguf",
-      "server_alias": "my-model",
-      "args": {
-        "--ctx-size": 131072,
-        "--cache-type-k": "q8_0",
-        "--cache-type-v": "q8_0",
-        "--fit-target": 3584,
-        "--n-gpu-layers": "all"
-      }
-    }
-  }
-}
-```
-
-This keeps each model's metadata and its model-specific arguments in one nested object while still allowing family and runtime settings to be composed independently.
-
-### Single-profile compatibility
-
-The singular form remains supported:
+A model can compose family and feature/runtime profiles:
 
 ```json
 {
-  "profile": "qwen"
+  "profiles": ["qwen-base", "flash-attn", "mtp"]
 }
 ```
 
-It is equivalent to:
+Typical responsibilities are:
 
-```json
-{
-  "profiles": ["qwen"]
-}
+```text
+defaults
+    machine/server-wide settings
+    host, port
+
+family profiles
+    qwen-base
+    llama
+    gemma
+    mistral
+
+feature/runtime profiles
+    mtp
+    flash-attn
+    flash-next
+    no-kv-unified
+
+model args
+    ctx-size
+    cache types
+    fit-target
+    batch sizes
+    GPU layers
+    exceptional overrides
 ```
 
-Do not specify both `profile` and `profiles` on the same model.
+The singular legacy form `"profile": "name"` is still accepted. Do not specify both `profile` and `profiles` for the same model.
 
-### Argument values
+## Argument values
 
-Keys under an `args` object are passed directly to `llama-server`.
+Keys inside an `args` object are passed directly to `llama-server`:
 
 ```json
 {
   "--ctx-size": 131072,
   "--flash-attn": "on",
   "--kv-offload": true,
-  "--no-kv-offload": true,
   "--some-disabled-flag": false
 }
 ```
 
-The mapping is:
+This becomes:
 
 ```text
-"--ctx-size": 131072          -> --ctx-size 131072
-"--flash-attn": "on"          -> --flash-attn on
-"--kv-offload": true          -> --kv-offload
-"--no-kv-offload": true       -> --no-kv-offload
-"--some-disabled-flag": false -> omitted
+--ctx-size 131072
+--flash-attn on
+--kv-offload
 ```
 
-`false` means "omit this flag"; it does not automatically emit an inverse `--no-*` flag.
+A boolean `false` omits the flag; it does not automatically emit an inverse `--no-*` option.
 
-An array repeats the same flag:
+JSON arrays repeat a flag:
 
 ```json
 {
@@ -271,66 +181,42 @@ An array repeats the same flag:
 }
 ```
 
-becomes:
+## Data vs. artifacts
+
+Keep this repository declarative. Store model paths and build paths here, but keep the large artifacts themselves elsewhere:
 
 ```text
---some-repeatable-option one --some-repeatable-option two
+~/models/
+    GGUF files
+
+~/workspace/llama.cpp*
+    llama.cpp source/builds
+
+llama-profile-launcher/
+    launcher
+    configuration
+    shell integration
+    setup scripts
+    tests
 ```
-
-Keeping the actual llama.cpp option names in JSON means new llama.cpp flags usually require no launcher changes.
-
-## Migrating from v0.1.0 TOML
-
-`v0.1.0` is the last TOML-based version. Current `main` uses JSON and defaults to:
-
-```text
-~/.config/llama-profile-launcher/models.json
-```
-
-Python 3.11 can convert an existing TOML config without third-party packages:
-
-```bash
-python3 -c 'import json,tomllib,sys; json.dump(tomllib.load(open(sys.argv[1],"rb")), open(sys.argv[2],"w"), indent=2); print(file=open(sys.argv[2],"a"))' \
-  ~/.config/llama-profile-launcher/models.toml \
-  ~/.config/llama-profile-launcher/models.json
-```
-
-Review the generated JSON, then use the new launcher normally. Standard JSON does not support comments, so TOML comments are not carried across.
-
-## Included profiles
-
-The checked-in `llama-models.json` demonstrates the intended structure:
-
-- `qwen` — model-family generation settings
-- `mtp` — MTP/speculative decoding settings
-- `flash-next` — Flash Next runtime settings
-- `no-kv-unified` — a small opt-in runtime feature
-
-Models compose these profiles and keep context size, cache types, fit targets, batch sizes, GPU-layer choices, and exceptional overrides in their own `args` objects.
 
 ## Tests
-
-Run the test suite with:
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-## Repository layout
+No third-party Python packages are required.
+
+## Migration from v0.1.0
+
+`v0.1.0` is the last TOML-based release. Current `main` uses strict JSON and defaults to:
 
 ```text
-.
-├── llama                 # Python launcher
-├── llama-models.json     # model/profile configuration
-├── tests/
-│   ├── test_config.py    # JSON config loading tests
-│   └── test_profiles.py  # profile composition tests
-├── bash_completion/
-│   └── llama             # dynamic Bash completion
-├── bashrc.snippet        # optional convenience aliases
-├── README.md
-└── LICENSE
+~/.config/llama-profile-launcher/models.json
 ```
+
+Standard JSON does not support comments.
 
 ## License
 

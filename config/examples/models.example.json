@@ -1,0 +1,48 @@
+{
+  "binaries": {
+    "native": "~/workspace/llama.cpp/build/bin/llama-server"
+  },
+  "defaults": {
+    "args": {
+      "--host": "127.0.0.1",
+      "--port": 8080
+    }
+  },
+  "profiles": {
+    "qwen-base": {
+      "args": {
+        "--parallel": 1,
+        "--jinja": true,
+        "--temp": 1,
+        "--top-p": 0.95,
+        "--top-k": 20,
+        "--min-p": 0
+      }
+    },
+    "flash-attn": {
+      "args": {
+        "--flash-attn": "on"
+      }
+    },
+    "mtp": {
+      "args": {
+        "--spec-type": "draft-mtp",
+        "--spec-draft-n-max": 3
+      }
+    }
+  },
+  "models": {
+    "my-model": {
+      "binary": "native",
+      "profiles": ["qwen-base", "flash-attn", "mtp"],
+      "model": "~/models/model.gguf",
+      "server_alias": "my-model",
+      "args": {
+        "--ctx-size": 131072,
+        "--cache-type-k": "q8_0",
+        "--cache-type-v": "q8_0",
+        "--n-predict": 32768
+      }
+    }
+  }
+}
