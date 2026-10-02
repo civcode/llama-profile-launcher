@@ -5,9 +5,13 @@
 native = "/home/chris/workspace/llama.cpp/build-native/bin/llama-server"
 qwen38 = "/home/chris/workspace/llama.cpp-qwen38-mtp/build/bin/llama-server"
 
+# Machine/server-wide settings shared by every model.
 [defaults.args]
 "--host" = "127.0.0.1"
 "--port" = 8080
+
+# Model-family profile: generation behavior shared by Qwen models.
+[profiles."qwen".args]
 "--parallel" = 1
 "--temp" = 1.0
 "--top-p" = 0.95
@@ -18,16 +22,22 @@ qwen38 = "/home/chris/workspace/llama.cpp-qwen38-mtp/build/bin/llama-server"
 "--reasoning" = "auto"
 "--reasoning-budget" = -1
 
-[profiles."flash".args]
+# Feature/runtime profiles. Models can compose these with a family profile.
+[profiles."mtp".args]
 "--spec-type" = "draft-mtp"
 "--spec-draft-n-max" = 3
+
+[profiles."flash-next".args]
 "--load-mode" = "mmap"
 "--lazy-mode" = "on"
 "--flash-attn" = "on"
+
+[profiles."no-kv-unified".args]
 "--no-kv-unified" = true
 
 [models."qwen-27b-120k"]
 binary = "native"
+profiles = ["qwen", "mtp"]
 model = "~/models/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf"
 server_alias = "qwen3.8-27b-gsq-rco-iq3_s-120k"
 
@@ -39,13 +49,11 @@ server_alias = "qwen3.8-27b-gsq-rco-iq3_s-120k"
 "--ctx-size" = 122880
 "--cache-type-k" = "q4_0"
 "--cache-type-v" = "q4_0"
-"--spec-type" = "draft-mtp"
-"--spec-draft-n-max" = 3
 "--n-predict" = 16384
 
 [models."qwen-flash-q4-128k"]
 binary = "qwen38"
-profile = "flash"
+profiles = ["qwen", "flash-next", "mtp", "no-kv-unified"]
 model = "~/models/Qwen3.8-Flash-Next/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf"
 draft_model = "~/models/Qwen3.8-Flash-Next/MTP/mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf"
 server_alias = "qwen3.8-flash-next-iq4_xs-128k"
@@ -61,7 +69,7 @@ server_alias = "qwen3.8-flash-next-iq4_xs-128k"
 
 [models."qwen-flash-q3-96k"]
 binary = "qwen38"
-profile = "flash"
+profiles = ["qwen", "flash-next", "mtp", "no-kv-unified"]
 model = "~/models/Qwen3.8-Flash-Next/UD-Q3_K_XL/Qwen3.8-Flash-Next-UD-Q3_K_XL-00001-of-00003.gguf"
 draft_model = "~/models/Qwen3.8-Flash-Next/MTP/mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf"
 server_alias = "qwen3.8-flash-next-q3_k_xl-96k"
@@ -73,7 +81,7 @@ server_alias = "qwen3.8-flash-next-q3_k_xl-96k"
 
 [models."qwen-flash-q3-128k"]
 binary = "qwen38"
-profile = "flash"
+profiles = ["qwen", "flash-next", "mtp", "no-kv-unified"]
 model = "~/models/Qwen3.8-Flash-Next/UD-Q3_K_XL/Qwen3.8-Flash-Next-UD-Q3_K_XL-00001-of-00003.gguf"
 draft_model = "~/models/Qwen3.8-Flash-Next/MTP/mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf"
 server_alias = "qwen3.8-flash-next-q3_k_xl-128k"
@@ -85,14 +93,11 @@ server_alias = "qwen3.8-flash-next-q3_k_xl-128k"
 
 [models."qwen-flash-gsq-rco-iq3-128k"]
 binary = "qwen38"
+profiles = ["qwen", "flash-next", "no-kv-unified"]
 model = "~/models/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/IQ3_XXS/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf"
 server_alias = "qwen3.8-flash-next-gsq-rco-iq3_xxs-128k"
 
 [models."qwen-flash-gsq-rco-iq3-128k".args]
 "--fit-target" = 256
-"--load-mode" = "mmap"
-"--lazy-mode" = "on"
-"--flash-attn" = "on"
-"--no-kv-unified" = true
 "--ctx-size" = 131072
 "--n-predict" = 16384

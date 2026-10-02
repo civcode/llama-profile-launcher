@@ -48,6 +48,52 @@ def merge_args(*sources: dict[str, Any] | None) -> dict[str, Any]:
     return merged
 
 
+def model_profiles(model: dict[str, Any], name: str) -> list[str]:
+    """Return profile names for a model, accepting legacy singular profile."""
+    profile = model.get("profile")
+    profiles = model.get("profiles")
+
+    if profile is not None and profiles is not None:
+        raise ConfigError(f"model {name!r} cannot use both 'profile' and 'profiles'")
+
+    if profiles is not None:
+        if not isinstance(profiles, list) or not all(
+            isinstance(item, str) and item for item in profiles
+        ):
+            raise ConfigError(f"model {name!r} 'profiles' must be a list of names")
+        return profiles
+
+    if profile is None:
+        return []
+    if not isinstance(profile, str) or not profile:
+        raise ConfigError(f"model {name!r} 'profile' must be a name")
+    return [profile]
+
+
+def profile_args(config: dict[str, Any], model: dict[str, Any], name: str) -> list[dict[str, Any]]:
+    """Resolve profile argument tables in declaration order."""
+    names = model_profiles(model, name)
+    if not names:
+        return []
+
+    profiles = config.get("profiles")
+    if not isinstance(profiles, dict):
+        raise ConfigError(f"model {name!r} references profiles but [profiles] is missing")
+
+    sources: list[dict[str, Any]] = []
+    for profile_name in names:
+        profile = profiles.get(profile_name)
+        if not isinstance(profile, dict):
+            raise ConfigError(
+                f"model {name!r} references unknown profile {profile_name!r}"
+            )
+        args = profile.get("args", {})
+        if not isinstance(args, dict):
+            raise ConfigError(f"profile {profile_name!r} args must be a table")
+        sources.append(args)
+    return sources
+
+
 def append_flag_args(groups: list[list[str]], args: dict[str, Any]) -> None:
     """Append config arguments as argument groups (a flag plus its values)."""
     for flag, value in args.items():
@@ -120,18 +166,8 @@ def model_command(config: dict[str, Any], name: str) -> list[list[str]]:
         raise ConfigError(f"model {name!r} is missing a model path")
 
     defaults = config.get("defaults", {}).get("args", {})
-    profile_args: dict[str, Any] = {}
-    profile_name = model.get("profile")
-    if profile_name:
-        try:
-            profile_args = config["profiles"][profile_name].get("args", {})
-        except (KeyError, TypeError) as exc:
-            raise ConfigError(
-                f"model {name!r} references unknown profile {profile_name!r}"
-            ) from exc
-
     model_args = model.get("args", {})
-    args = merge_args(defaults, profile_args, model_args)
+    args = merge_args(defaults, *profile_args(config, model, name), model_args)
 
     command: list[list[str]] = [[binary], ["-m", expand_path(model_path)]]
 

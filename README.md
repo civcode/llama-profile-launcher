@@ -2,7 +2,7 @@
 
 A tiny Python launcher for keeping `llama.cpp` / `llama-server` model profiles in a human-readable TOML file instead of large shell aliases.
 
-It supports shared defaults, reusable profiles, per-model overrides, arbitrary extra `llama-server` arguments, and dynamic Bash completion for model names.
+It supports shared defaults, composable profiles, per-model overrides, arbitrary extra `llama-server` arguments, and dynamic Bash completion for model names.
 
 ## Why
 
@@ -12,16 +12,23 @@ Instead of maintaining aliases like this:
 alias my-model='llama-server -m ... --ctx-size ... --flash-attn on ...'
 ```
 
-define the model once in TOML and run:
+define reusable settings once and compose them for each model:
+
+```toml
+[models."my-model"]
+profiles = ["qwen", "flash-next", "mtp"]
+```
+
+Then launch it with:
 
 ```bash
-llama qwen-flash-q4-128k
+llama my-model
 ```
 
 Adding a model to the TOML file automatically adds it to Bash completion:
 
 ```text
-llama qwen<TAB><TAB>
+llama my<TAB><TAB>
 ```
 
 ## Requirements
@@ -94,7 +101,7 @@ Launch one:
 llama qwen-flash-q4-128k
 ```
 
-Show the fully resolved command, one argument per line:
+Show the fully resolved command, one argument group per line:
 
 ```bash
 llama --show qwen-flash-q4-128k
@@ -149,54 +156,107 @@ export LLAMA_PROFILE_CONFIG=~/my-models.toml
 
 ## Configuration
 
-The configuration has three layers:
+The configuration is designed around four conceptual layers:
 
-1. `[defaults.args]` — arguments shared by every model.
-2. `[profiles."<name>".args]` — reusable groups of arguments.
-3. `[models."<name>".args]` — model-specific overrides.
+1. `[defaults.args]` — machine/server-wide settings shared by every model.
+2. Family profiles such as `qwen`, `llama`, `gemma`, or `mistral`.
+3. Feature/runtime profiles such as `mtp`, `flash-next`, or an offload preset.
+4. `[models."<name>".args]` — model-specific tuning and final overrides.
 
-Quote profile and model names (the `"<name>"` segments). Bare TOML keys cannot contain `.` or other special characters, so an unquoted `qwen-3.8-flash-next` would be split into nested `qwen-3` → `8-...` tables rather than read as one name.
+Family and feature profiles use the same `[profiles."<name>".args]` mechanism. A model composes as many profiles as it needs with `profiles = [...]`.
 
-Later layers override earlier layers by flag name.
+Arguments are merged in this order:
 
-Example:
+```text
+defaults
+→ profiles[0]
+→ profiles[1]
+→ ...
+→ model args
+```
+
+Later layers override earlier layers by flag name. This makes profile order meaningful.
+
+### Example
 
 ```toml
 [binaries]
 native = "~/workspace/llama.cpp/build/bin/llama-server"
 
+# Machine/server-wide settings.
 [defaults.args]
 "--host" = "127.0.0.1"
 "--port" = 8080
+
+# Model-family settings.
+[profiles."qwen".args]
 "--parallel" = 1
 "--jinja" = true
+"--temp" = 1.0
+"--top-p" = 0.95
+"--top-k" = 20
+"--min-p" = 0.0
+"--reasoning-format" = "auto"
+"--reasoning" = "auto"
+"--reasoning-budget" = -1
 
-[profiles."flash".args]
-"--flash-attn" = "on"
+# Feature/runtime settings.
+[profiles."flash-next".args]
 "--load-mode" = "mmap"
 "--lazy-mode" = "on"
+"--flash-attn" = "on"
+
+[profiles."mtp".args]
+"--spec-type" = "draft-mtp"
+"--spec-draft-n-max" = 3
 
 [models."my-model"]
 binary = "native"
-profile = "flash"
+profiles = ["qwen", "flash-next", "mtp"]
 model = "~/models/model.gguf"
+draft_model = "~/models/mtp.gguf"
 server_alias = "my-model"
 
+# Values specific to this launch configuration.
 [models."my-model".args]
 "--ctx-size" = 131072
-"--n-predict" = 16384
+"--cache-type-k" = "q8_0"
+"--cache-type-v" = "q8_0"
+"--fit-target" = 3584
+"--n-gpu-layers" = "all"
 ```
+
+Quote profile and model names (the `"<name>"` segments). Bare TOML keys cannot contain `.` or other special characters, so an unquoted `qwen-3.8-flash-next` would be split into nested tables rather than read as one name.
+
+### Backward compatibility
+
+Existing configurations with a single profile continue to work:
+
+```toml
+profile = "qwen"
+```
+
+This is equivalent to:
+
+```toml
+profiles = ["qwen"]
+```
+
+Do not specify both `profile` and `profiles` on the same model.
 
 ### Argument values
 
 The keys under an `.args` table are passed directly to `llama-server`.
 
 ```toml
-"--ctx-size" = 131072       # -> --ctx-size 131072
-"--flash-attn" = "on"      # -> --flash-attn on
-"--jinja" = true            # -> --jinja
+"--ctx-size" = 131072           # -> --ctx-size 131072
+"--flash-attn" = "on"          # -> --flash-attn on
+"--kv-offload" = true           # -> --kv-offload
+"--no-kv-offload" = true        # -> --no-kv-offload
 "--some-disabled-flag" = false  # omitted
 ```
+
+`false` means "omit this flag"; it does not automatically emit an inverse `--no-*` flag.
 
 A list repeats the same flag:
 
@@ -214,15 +274,22 @@ Keeping the actual llama.cpp option names in TOML means new llama.cpp flags usua
 
 ## Included profiles
 
-The checked-in `llama-models.toml` contains the profiles that motivated this project:
+The checked-in `llama-models.toml` demonstrates the intended structure:
 
-- `qwen-27b-120k`
-- `qwen-flash-q4-128k`
-- `qwen-flash-q3-96k`
-- `qwen-flash-q3-128k`
-- `qwen-flash-gsq-rco-iq3-128k`
+- `qwen` — model-family generation settings
+- `mtp` — MTP/speculative decoding settings
+- `flash-next` — Flash Next runtime settings
+- `no-kv-unified` — a small opt-in runtime feature
 
-Adjust the paths for your system before using them.
+Models compose these profiles and keep context size, cache types, fit targets, batch sizes, GPU-layer choices, and exceptional overrides in their own `.args` tables.
+
+## Tests
+
+Run the test suite with:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
 
 ## Repository layout
 
@@ -230,6 +297,8 @@ Adjust the paths for your system before using them.
 .
 ├── llama                 # Python launcher
 ├── llama-models.toml     # model/profile configuration
+├── tests/
+│   └── test_profiles.py  # profile composition tests
 ├── bash_completion/
 │   └── llama             # dynamic Bash completion
 ├── bashrc.snippet        # optional convenience aliases
