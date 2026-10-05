@@ -78,6 +78,24 @@ Launch a model:
 llama qwen-27b-120k
 ```
 
+Launch a llama.cpp router from the same model profiles:
+
+```bash
+llama --router qwen38
+```
+
+Inspect configured routers, the resolved router command, or the generated preset:
+
+```bash
+llama --list-routers
+llama --show-router qwen38
+llama --export-router qwen38
+```
+
+Router presets are generated into `$XDG_CACHE_HOME/llama-profile-launcher` (or
+`~/.cache/llama-profile-launcher`) when a router is launched. The JSON config
+remains the source of truth.
+
 Show the fully resolved command:
 
 ```bash
@@ -103,12 +121,17 @@ Everything after the model name is passed to `llama-server`, so launcher flags s
 Configuration is layered as:
 
 ```text
-defaults
+defaults.args
 → profiles[0]
 → profiles[1]
 → ...
 → model args
 ```
+
+`defaults.server_args` contains server-process options such as `--host` and
+`--port`. Direct model launches combine `server_args` with the resolved
+model arguments. Router launches use `server_args` on the router process and
+keep them out of per-model presets.
 
 Later layers override earlier layers by flag name.
 
@@ -149,6 +172,53 @@ model args
 ```
 
 The singular legacy form `"profile": "name"` is still accepted. Do not specify both `profile` and `profiles` for the same model.
+
+## Router configuration
+
+Routers group models that use the same `llama-server` binary. If `models` is
+omitted, every model using the router's `binary` is included.
+
+```json
+{
+  "routers": {
+    "qwen38": {
+      "binary": "qwen38",
+      "args": {
+        "--no-models-autoload": true,
+        "--models-max": 1
+      }
+    }
+  }
+}
+```
+
+A router may select an explicit ordered subset:
+
+```json
+{
+  "routers": {
+    "small": {
+      "binary": "qwen38",
+      "models": ["qwen-27b-64k", "qwen-3.5-4b-240k"]
+    }
+  }
+}
+```
+
+The generated INI contains fully resolved model settings. Profile composition
+therefore behaves identically for direct and router launches. The model profile
+name becomes the router model ID. Existing `server_alias` values remain in use
+for direct launches but are intentionally omitted from router presets because
+llama.cpp assigns the preset section name as the child model alias.
+
+Router CLI arguments take precedence over model preset values in llama.cpp.
+Keep per-model settings such as context size, KV cache types, GPU layers,
+sampling parameters, and speculative decoding in profiles/model args rather
+than in router args.
+
+`--export-router ROUTER` prints the generated INI without writing a cache file.
+`--show-router ROUTER` prints the router command. `--dry-run --router ROUTER`
+prints the command without generating a preset or starting the server.
 
 ## Argument values
 
