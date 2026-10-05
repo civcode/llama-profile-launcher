@@ -14,11 +14,15 @@ _llama_profile_launcher_complete() {
             mapfile -t COMPREPLY < <(compgen -W "$(llama --list 2>/dev/null)" -- "$cur")
             return
             ;;
+        --show-router|--export-router|--router)
+            mapfile -t COMPREPLY < <(compgen -W "$(llama --list-routers 2>/dev/null)" -- "$cur")
+            return
+            ;;
     esac
 
     if [[ $COMP_CWORD -eq 1 ]]; then
         mapfile -t COMPREPLY < <(
-            compgen -W "--config --list --show --dry-run --one-line $(llama --list 2>/dev/null)" -- "$cur"
+            compgen -W "--config --list --show --list-routers --show-router --export-router --router --dry-run --one-line $(llama --list 2>/dev/null)" -- "$cur"
         )
     fi
 }
