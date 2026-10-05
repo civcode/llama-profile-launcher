@@ -4,7 +4,8 @@
     "qwen38": "/home/chris/workspace/llama.cpp-qwen38-mtp/build/bin/llama-server"
   },
   "defaults": {
-    "args": {
+    "args": {},
+    "server_args": {
       "--host": "127.0.0.1",
       "--port": 8080
     }
@@ -49,7 +50,11 @@
   "models": {
     "qwen-27b-120k": {
       "binary": "qwen38",
-      "profiles": ["qwen-base", "flash-attn", "mtp"],
+      "profiles": [
+        "qwen-base",
+        "flash-attn",
+        "mtp"
+      ],
       "model": "~/models/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf",
       "server_alias": "qwen3.8-27b-gsq-rco-iq3_s-120k",
       "args": {
@@ -64,7 +69,11 @@
     },
     "qwen-27b-64k": {
       "binary": "qwen38",
-      "profiles": ["qwen-base", "flash-attn", "mtp"],
+      "profiles": [
+        "qwen-base",
+        "flash-attn",
+        "mtp"
+      ],
       "model": "~/models/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf",
       "server_alias": "qwen3.8-27b-gsq-rco-iq3_s-64k",
       "args": {
@@ -79,7 +88,11 @@
     },
     "qwen-flash-gsq-rco-iq3-128k": {
       "binary": "qwen38",
-      "profiles": ["qwen-base", "flash-attn", "flash-next"],
+      "profiles": [
+        "qwen-base",
+        "flash-attn",
+        "flash-next"
+      ],
       "model": "~/models/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/IQ3_XXS/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf",
       "server_alias": "qwen3.8-flash-next-gsq-rco-iq3_xxs-128k",
       "args": {
@@ -92,7 +105,12 @@
     },
     "qwen-flash-gsq-rco-iq3-256k": {
       "binary": "qwen38",
-      "profiles": ["qwen-base", "flash-attn", "flash-next", "no-kv-unified"],
+      "profiles": [
+        "qwen-base",
+        "flash-attn",
+        "flash-next",
+        "no-kv-unified"
+      ],
       "model": "~/models/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/IQ3_XXS/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf",
       "server_alias": "qwen3.8-flash-next-gsq-rco-iq3_xxs-256k",
       "args": {
@@ -103,7 +121,11 @@
     },
     "qwen-3.5-4b-240k": {
       "binary": "qwen38",
-      "profiles": ["qwen-base", "flash-attn", "mtp"],
+      "profiles": [
+        "qwen-base",
+        "flash-attn",
+        "mtp"
+      ],
       "model": "~/models/Qwen3.5-4B-MTP/Qwen3.5-4B-UD-Q8_K_XL.gguf",
       "server_alias": "qwen3.5-4b-q8_k_xl-mtp-240k",
       "args": {
@@ -118,7 +140,13 @@
     },
     "qwen-flash-gsq-rco-iq3-mtp-128k": {
       "binary": "qwen38",
-      "profiles": ["qwen-base", "flash-attn", "flash-next", "mtp", "no-kv-unified"],
+      "profiles": [
+        "qwen-base",
+        "flash-attn",
+        "flash-next",
+        "mtp",
+        "no-kv-unified"
+      ],
       "model": "~/models/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/IQ3_XXS/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf",
       "draft_model": "/home/chris/models/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/MTP/mtp-Qwen3.8-Flash-Next-shared-Q4_K_M.gguf",
       "server_alias": "qwen3.8-flash-next-gsq-rco-iq3_xxs-128k",
@@ -126,6 +154,15 @@
         "--fit-target": 1800,
         "--ctx-size": 131072,
         "--n-predict": 32768
+      }
+    }
+  },
+  "routers": {
+    "qwen38": {
+      "binary": "qwen38",
+      "args": {
+        "--no-models-autoload": true,
+        "--models-max": 1
       }
     }
   }
