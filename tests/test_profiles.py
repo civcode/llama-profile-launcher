@@ -33,6 +33,37 @@ def base_config() -> dict:
 
 
 class ProfileTests(unittest.TestCase):
+    def test_resolve_model_returns_normalized_model_data(self) -> None:
+        config = base_config()
+        config["models"]["test"]["draft_model"] = "~/models/draft.gguf"
+        config["models"]["test"]["server_alias"] = "test-alias"
+
+        resolved = llama.resolve_model(config, "test")
+
+        self.assertEqual(resolved.name, "test")
+        self.assertEqual(resolved.binary_key, "test")
+        self.assertEqual(resolved.binary_path, "/bin/llama-server")
+        self.assertEqual(resolved.model_path, "/models/test.gguf")
+        self.assertTrue(resolved.draft_model_path.endswith("/models/draft.gguf"))
+        self.assertEqual(resolved.server_alias, "test-alias")
+        self.assertEqual(resolved.args["--shared"], "model")
+        self.assertEqual(resolved.args["--runtime"], "on")
+        self.assertEqual(resolved.args["--ctx-size"], 4096)
+
+    def test_model_command_uses_resolved_model(self) -> None:
+        config = base_config()
+        config["models"]["test"]["draft_model"] = "/models/draft.gguf"
+        config["models"]["test"]["server_alias"] = "test-alias"
+
+        command = llama.flatten(llama.model_command(config, "test"))
+
+        self.assertEqual(command[0], "/bin/llama-server")
+        self.assertEqual(command[1:3], ["-m", "/models/test.gguf"])
+        self.assertIn("-md", command)
+        self.assertIn("/models/draft.gguf", command)
+        self.assertIn("--alias", command)
+        self.assertIn("test-alias", command)
+
     def test_profiles_are_composed_in_order_then_model_overrides(self) -> None:
         command = llama.flatten(llama.model_command(base_config(), "test"))
         self.assertEqual(command.count("--shared"), 1)
