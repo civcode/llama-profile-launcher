@@ -9,6 +9,7 @@ import re
 import shlex
 import sys
 import json
+from dataclasses import dataclass
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,17 @@ DEFAULT_CONFIG = Path("~/.config/llama-profile-launcher/models.json").expanduser
 
 class ConfigError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class ResolvedModel:
+    name: str
+    binary_key: str
+    binary_path: str
+    model_path: str
+    draft_model_path: str | None
+    server_alias: str | None
+    args: dict[str, Any]
 
 
 def expand_path(value: str) -> str:
@@ -146,7 +158,7 @@ def format_command(groups: list[list[str]], one_line: bool = False) -> str:
     return " \\\n".join(lines)
 
 
-def model_command(config: dict[str, Any], name: str) -> list[list[str]]:
+def resolve_model(config: dict[str, Any], name: str) -> ResolvedModel:
     models = config["models"]
     if name not in models:
         choices = ", ".join(sorted(models))
@@ -157,6 +169,8 @@ def model_command(config: dict[str, Any], name: str) -> list[list[str]]:
         raise ConfigError(f"model {name!r} must be a table")
 
     binary_key = model.get("binary")
+    if not isinstance(binary_key, str) or not binary_key:
+        raise ConfigError(f"model {name!r} is missing a binary name")
     try:
         binary = expand_path(config["binaries"][binary_key])
     except (KeyError, TypeError) as exc:
@@ -176,17 +190,36 @@ def model_command(config: dict[str, Any], name: str) -> list[list[str]]:
 
     args = merge_args(defaults, *profile_args(config, model, name), model_args)
 
-    command: list[list[str]] = [[binary], ["-m", expand_path(model_path)]]
-
     draft_model = model.get("draft_model")
-    if draft_model:
-        command.append(["-md", expand_path(draft_model)])
+    if draft_model is not None and not isinstance(draft_model, str):
+        raise ConfigError(f"model {name!r} draft_model must be a path string")
 
     server_alias = model.get("server_alias")
-    if server_alias:
-        command.append(["--alias", str(server_alias)])
+    if server_alias is not None and not isinstance(server_alias, str):
+        raise ConfigError(f"model {name!r} server_alias must be a string")
 
-    append_flag_args(command, args)
+    return ResolvedModel(
+        name=name,
+        binary_key=binary_key,
+        binary_path=binary,
+        model_path=expand_path(model_path),
+        draft_model_path=expand_path(draft_model) if draft_model else None,
+        server_alias=server_alias,
+        args=args,
+    )
+
+
+def model_command(config: dict[str, Any], name: str) -> list[list[str]]:
+    resolved = resolve_model(config, name)
+    command: list[list[str]] = [[resolved.binary_path], ["-m", resolved.model_path]]
+
+    if resolved.draft_model_path:
+        command.append(["-md", resolved.draft_model_path])
+
+    if resolved.server_alias:
+        command.append(["--alias", resolved.server_alias])
+
+    append_flag_args(command, resolved.args)
     return command
 
 
