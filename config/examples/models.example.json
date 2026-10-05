@@ -3,7 +3,8 @@
     "native": "~/workspace/llama.cpp/build/bin/llama-server"
   },
   "defaults": {
-    "args": {
+    "args": {},
+    "server_args": {
       "--host": "127.0.0.1",
       "--port": 8080
     }
@@ -34,7 +35,11 @@
   "models": {
     "my-model": {
       "binary": "native",
-      "profiles": ["qwen-base", "flash-attn", "mtp"],
+      "profiles": [
+        "qwen-base",
+        "flash-attn",
+        "mtp"
+      ],
       "model": "~/models/model.gguf",
       "server_alias": "my-model",
       "args": {
@@ -42,6 +47,15 @@
         "--cache-type-k": "q8_0",
         "--cache-type-v": "q8_0",
         "--n-predict": 32768
+      }
+    }
+  },
+  "routers": {
+    "native": {
+      "binary": "native",
+      "args": {
+        "--no-models-autoload": true,
+        "--models-max": 1
       }
     }
   }
