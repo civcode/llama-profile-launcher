@@ -22,7 +22,8 @@ The repository can also be the source of truth for a machine's actual llama.cpp 
 │   └── install.sh
 ├── tests/
 │   ├── test_config.py
-│   └── test_profiles.py
+│   ├── test_profiles.py
+│   └── test_router.py
 ├── README.md
 ├── LICENSE
 └── .gitignore
@@ -146,9 +147,11 @@ A model can compose family and feature/runtime profiles:
 Typical responsibilities are:
 
 ```text
-defaults
-    machine/server-wide settings
-    host, port
+defaults.server_args
+    host, port, router/server-wide settings
+
+defaults.args
+    model-instance defaults shared by all models
 
 family profiles
     qwen-base
@@ -243,13 +246,36 @@ This becomes:
 
 A boolean `false` omits the flag; it does not automatically emit an inverse `--no-*` option.
 
-JSON arrays repeat a flag:
+JSON arrays repeat a flag for direct model launches:
 
 ```json
 {
   "--some-repeatable-option": ["one", "two"]
 }
 ```
+
+Router preset export currently requires scalar argument values because llama.cpp's
+INI preset representation does not preserve the launcher's repeated-flag
+semantics. A model using an array-valued argument will be rejected when included
+in a router.
+
+## Using the router with Pi
+
+Start the router from the same profiles you already use for direct launches:
+
+```bash
+llama --router qwen38
+```
+
+With `--no-models-autoload` configured, Pi can connect to the router without
+loading a model immediately. Configure Pi's built-in llama.cpp provider for the
+router URL (for the workstation config, `http://127.0.0.1:8080`), then use
+`/llama` to load or unload one of the generated profile IDs. The profile names
+such as `qwen-27b-120k` and `qwen-27b-64k` are the router model IDs.
+
+This keeps the JSON model profiles authoritative: Pi discovers the models from
+llama.cpp, while context size, cache types, GPU placement, sampling, speculative
+decoding, and other per-model settings remain defined here.
 
 ## Data vs. artifacts
 
