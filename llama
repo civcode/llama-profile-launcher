@@ -8,6 +8,7 @@ import os
 import re
 import shlex
 import sys
+import tempfile
 import json
 from dataclasses import dataclass
 from collections.abc import Iterable
@@ -15,6 +16,27 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_CONFIG = Path("~/.config/llama-profile-launcher/models.json").expanduser()
+DEFAULT_CACHE_DIR = Path(
+    os.environ.get("XDG_CACHE_HOME", "~/.cache")
+).expanduser() / "llama-profile-launcher"
+
+# llama.cpp's router owns these options for child model instances. Keeping them
+# out of generated presets avoids misleading config and accidental conflicts.
+ROUTER_CONTROLLED_KEYS = {
+    "host",
+    "port",
+    "api-key",
+    "alias",
+    "hf",
+    "hf-repo",
+    "model",
+    "models-dir",
+    "models-preset",
+    "models-max",
+    "models-autoload",
+    "no-models-autoload",
+}
+LEGACY_ROUTER_SERVER_KEYS = {"host", "port", "api-key"}
 
 
 class ConfigError(RuntimeError):
@@ -29,6 +51,16 @@ class ResolvedModel:
     model_path: str
     draft_model_path: str | None
     server_alias: str | None
+    server_args: dict[str, Any]
+    args: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ResolvedRouter:
+    name: str
+    binary_key: str
+    binary_path: str
+    model_names: tuple[str, ...]
     args: dict[str, Any]
 
 
@@ -180,9 +212,17 @@ def resolve_model(config: dict[str, Any], name: str) -> ResolvedModel:
     if not isinstance(model_path, str):
         raise ConfigError(f"model {name!r} is missing a model path")
 
-    defaults = config.get("defaults", {}).get("args", {})
+    defaults_config = config.get("defaults", {})
+    if not isinstance(defaults_config, dict):
+        raise ConfigError("'defaults' must be an object")
+
+    defaults = defaults_config.get("args", {})
     if not isinstance(defaults, dict):
         raise ConfigError("'defaults.args' must be an object")
+
+    server_args = defaults_config.get("server_args", {})
+    if not isinstance(server_args, dict):
+        raise ConfigError("'defaults.server_args' must be an object")
 
     model_args = model.get("args", {})
     if not isinstance(model_args, dict):
@@ -205,6 +245,7 @@ def resolve_model(config: dict[str, Any], name: str) -> ResolvedModel:
         model_path=expand_path(model_path),
         draft_model_path=expand_path(draft_model) if draft_model else None,
         server_alias=server_alias,
+        server_args=dict(server_args),
         args=args,
     )
 
@@ -219,7 +260,178 @@ def model_command(config: dict[str, Any], name: str) -> list[list[str]]:
     if resolved.server_alias:
         command.append(["--alias", resolved.server_alias])
 
-    append_flag_args(command, resolved.args)
+    append_flag_args(command, merge_args(resolved.server_args, resolved.args))
+    return command
+
+
+def _router_key(flag: str) -> str:
+    if not flag.startswith("-"):
+        raise ConfigError(f"argument key must be a flag, got {flag!r}")
+    key = flag.lstrip("-")
+    if not key:
+        raise ConfigError(f"invalid empty argument flag {flag!r}")
+    return key
+
+
+def _preset_value(value: Any, *, model_name: str, flag: str) -> str | None:
+    if value is False or value is None:
+        return None
+    if value is True:
+        return "true"
+    if isinstance(value, list):
+        raise ConfigError(
+            f"model {model_name!r} argument {flag!r} repeats values; "
+            "router preset export currently requires a scalar value"
+        )
+    text = str(value)
+    if "\n" in text or "\r" in text:
+        raise ConfigError(
+            f"model {model_name!r} argument {flag!r} contains a newline"
+        )
+    return text
+
+
+def _default_server_args(config: dict[str, Any]) -> dict[str, Any]:
+    defaults_config = config.get("defaults", {})
+    if not isinstance(defaults_config, dict):
+        raise ConfigError("'defaults' must be an object")
+
+    server_args = defaults_config.get("server_args", {})
+    if not isinstance(server_args, dict):
+        raise ConfigError("'defaults.server_args' must be an object")
+
+    # Backward compatibility for v1 configs that put host/port in defaults.args.
+    legacy_defaults = defaults_config.get("args", {})
+    if not isinstance(legacy_defaults, dict):
+        raise ConfigError("'defaults.args' must be an object")
+    legacy_server_args = {
+        flag: value
+        for flag, value in legacy_defaults.items()
+        if _router_key(flag) in LEGACY_ROUTER_SERVER_KEYS
+    }
+    return merge_args(legacy_server_args, server_args)
+
+
+def resolve_router(config: dict[str, Any], name: str) -> ResolvedRouter:
+    routers = config.get("routers", {})
+    if not isinstance(routers, dict):
+        raise ConfigError("'routers' must be an object")
+    router = routers.get(name)
+    if not isinstance(router, dict):
+        choices = ", ".join(sorted(routers)) or "(none)"
+        raise ConfigError(f"unknown router {name!r}; available: {choices}")
+
+    binary_key = router.get("binary")
+    if not isinstance(binary_key, str) or not binary_key:
+        raise ConfigError(f"router {name!r} is missing a binary name")
+    try:
+        binary_path = expand_path(config["binaries"][binary_key])
+    except (KeyError, TypeError) as exc:
+        raise ConfigError(
+            f"router {name!r} references unknown binary {binary_key!r}"
+        ) from exc
+
+    router_args = router.get("args", {})
+    if not isinstance(router_args, dict):
+        raise ConfigError(f"router {name!r} args must be an object")
+    if any(_router_key(flag) == "models-preset" for flag in router_args):
+        raise ConfigError(
+            f"router {name!r} must not set --models-preset; the launcher manages it"
+        )
+
+    configured_models = router.get("models")
+    if configured_models is None:
+        model_names = tuple(
+            sorted(
+                model_name
+                for model_name, model in config["models"].items()
+                if isinstance(model, dict) and model.get("binary") == binary_key
+            )
+        )
+    else:
+        if not isinstance(configured_models, list) or not all(
+            isinstance(model_name, str) and model_name
+            for model_name in configured_models
+        ):
+            raise ConfigError(f"router {name!r} models must be a list of names")
+        model_names = tuple(configured_models)
+
+    if not model_names:
+        raise ConfigError(
+            f"router {name!r} has no models using binary {binary_key!r}"
+        )
+
+    for model_name in model_names:
+        resolved = resolve_model(config, model_name)
+        if resolved.binary_key != binary_key:
+            raise ConfigError(
+                f"router {name!r} uses binary {binary_key!r} but model "
+                f"{model_name!r} uses {resolved.binary_key!r}"
+            )
+
+    return ResolvedRouter(
+        name=name,
+        binary_key=binary_key,
+        binary_path=binary_path,
+        model_names=model_names,
+        args=merge_args(_default_server_args(config), router_args),
+    )
+
+
+def router_preset_text(config: dict[str, Any], name: str) -> str:
+    router = resolve_router(config, name)
+    lines = ["version = 1", ""]
+
+    for model_name in router.model_names:
+        resolved = resolve_model(config, model_name)
+        lines.append(f"[{model_name}]")
+        lines.append(f"model = {resolved.model_path}")
+        if resolved.draft_model_path:
+            lines.append(f"model-draft = {resolved.draft_model_path}")
+
+        for flag, value in resolved.args.items():
+            key = _router_key(flag)
+            if key in ROUTER_CONTROLLED_KEYS:
+                continue
+            rendered = _preset_value(value, model_name=model_name, flag=flag)
+            if rendered is not None:
+                lines.append(f"{key} = {rendered}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def router_preset_path(name: str) -> Path:
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", name).strip("-") or "router"
+    return DEFAULT_CACHE_DIR / f"{safe_name}.models.ini"
+
+
+def write_router_preset(config: dict[str, Any], name: str) -> Path:
+    path = router_preset_path(name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = router_preset_text(config, name)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        delete=False,
+    ) as handle:
+        handle.write(content)
+        temp_path = Path(handle.name)
+    os.replace(temp_path, path)
+    return path
+
+
+def router_command(
+    config: dict[str, Any], name: str, preset_path: Path
+) -> list[list[str]]:
+    router = resolve_router(config, name)
+    command: list[list[str]] = [
+        [router.binary_path],
+        ["--models-preset", str(preset_path)],
+    ]
+    append_flag_args(command, router.args)
     return command
 
 
@@ -238,11 +450,32 @@ def parse_cli(argv: list[str]) -> argparse.Namespace:
         default=Path(os.environ.get("LLAMA_PROFILE_CONFIG", DEFAULT_CONFIG)).expanduser(),
         help="config path (default: %(default)s; env: LLAMA_PROFILE_CONFIG)",
     )
-    parser.add_argument("--list", action="store_true", help="list configured model names")
-    parser.add_argument(
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument("--list", action="store_true", help="list configured model names")
+    action.add_argument(
         "--show",
         metavar="MODEL",
         help="print the resolved llama-server command without running it",
+    )
+    action.add_argument(
+        "--list-routers",
+        action="store_true",
+        help="list configured router names",
+    )
+    action.add_argument(
+        "--show-router",
+        metavar="ROUTER",
+        help="print the resolved router command without running it",
+    )
+    action.add_argument(
+        "--export-router",
+        metavar="ROUTER",
+        help="print the generated llama.cpp router preset INI",
+    )
+    action.add_argument(
+        "--router",
+        metavar="ROUTER",
+        help="launch a llama.cpp router from configured model profiles",
     )
     parser.add_argument(
         "--dry-run",
@@ -275,12 +508,49 @@ def main(argv: list[str] | None = None) -> int:
                 print(name)
             return 0
 
+        if ns.list_routers:
+            routers = config.get("routers", {})
+            if not isinstance(routers, dict):
+                raise ConfigError("'routers' must be an object")
+            for name in sorted(routers):
+                print(name)
+            return 0
+
         if ns.show:
             print_model(config, ns.show, one_line=ns.one_line)
             return 0
 
+        if ns.export_router:
+            print(router_preset_text(config, ns.export_router), end="")
+            return 0
+
+        if ns.show_router:
+            preset_path = router_preset_path(ns.show_router)
+            print(
+                format_command(
+                    router_command(config, ns.show_router, preset_path),
+                    one_line=ns.one_line,
+                )
+            )
+            return 0
+
+        if ns.router:
+            preset_path = router_preset_path(ns.router)
+            groups = router_command(config, ns.router, preset_path)
+            command = flatten(groups)
+
+            if ns.dry_run:
+                print(format_command(groups, one_line=ns.one_line))
+                return 0
+
+            write_router_preset(config, ns.router)
+            os.execv(command[0], command)
+            return 0
+
         if not ns.model:
-            raise ConfigError("MODEL is required (or use --list / --show MODEL)")
+            raise ConfigError(
+                "MODEL is required (or use --list, --show, or a router option)"
+            )
 
         groups = model_command(config, ns.model)
         groups.extend(group_tokens(ns.extra))
